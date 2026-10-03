@@ -11,11 +11,23 @@ const SUPABASE_URL = 'https://dasyopaotgsgxvizhqna.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_wISyIFeMATmrnp2I7kTvyg_B6UQfTT1';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Password Admin BK
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SandiBK2026Secure!';
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 1. API Kirim Laporan Baru (Disimpan ke Supabase Database)
+// 1. API Login Admin (Pemeriksaan Password)
+app.post('/api/admin/login', (req, res) => {
+    const { password } = req.body;
+    if (password === ADMIN_PASSWORD) {
+        return res.json({ success: true, message: 'Login berhasil!' });
+    }
+    return res.status(401).json({ success: false, message: 'Kata sandi salah!' });
+});
+
+// 2. API Kirim Laporan Baru (Siswa -> Supabase)
 app.post('/api/reports', async (req, res) => {
     try {
         const { category, description } = req.body;
@@ -24,7 +36,6 @@ app.post('/api/reports', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Kategori dan deskripsi wajib diisi!' });
         }
 
-        // Generate Kode Tiket Acak (contoh: BK-7A92)
         const ticketCode = 'BK-' + Math.random().toString(36).substring(2, 6).toUpperCase();
 
         const { data, error } = await supabase
@@ -53,7 +64,7 @@ app.post('/api/reports', async (req, res) => {
     }
 });
 
-// 2. API Cek Laporan berdasarkan Kode Tiket (Siswa)
+// 3. API Cek Laporan berdasarkan Kode Tiket (Siswa)
 app.get('/api/reports/check/:ticketCode', async (req, res) => {
     try {
         const { ticketCode } = req.params;
@@ -85,7 +96,7 @@ app.get('/api/reports/check/:ticketCode', async (req, res) => {
     }
 });
 
-// 3. API Ambil Semua Laporan (Portal BK Admin)
+// 4. API Ambil Semua Laporan (Portal BK Admin)
 app.get('/api/admin/reports', async (req, res) => {
     try {
         const { data, error } = await supabase
@@ -112,7 +123,7 @@ app.get('/api/admin/reports', async (req, res) => {
     }
 });
 
-// 4. API Balas & Update Status Laporan (Portal BK Admin)
+// 5. API Balas & Update Status Laporan (Portal BK Admin)
 app.post('/api/admin/reply', async (req, res) => {
     try {
         const { ticketCode, status, adminResponse } = req.body;
