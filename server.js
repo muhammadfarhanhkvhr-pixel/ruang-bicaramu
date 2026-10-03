@@ -1,24 +1,29 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Konfirmasi Koneksi Supabase
+// Konfigurasi Supabase REST API
 const SUPABASE_URL = 'https://dasyopaotgsgxvizhqna.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_wISyIFeMATmrnp2I7kTvyg_B6UQfTT1';
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Password Admin BK
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'SandiBK2026Secure!';
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 1. API Login Admin (Pemeriksaan Password)
+// Header standar untuk panggil Supabase API
+const getHeaders = () => ({
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
+});
+
+// 1. API Login Admin
 app.post('/api/admin/login', (req, res) => {
     const { password } = req.body;
     if (password === ADMIN_PASSWORD) {
@@ -38,25 +43,29 @@ app.post('/api/reports', async (req, res) => {
 
         const ticketCode = 'BK-' + Math.random().toString(36).substring(2, 6).toUpperCase();
 
-        const { data, error } = await supabase
-            .from('reports')
-            .insert([
-                { 
-                    ticket_code: ticketCode, 
-                    category, 
-                    description, 
-                    status: 'Pending', 
-                    admin_response: '' 
-                }
-            ])
-            .select();
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/reports`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({
+                ticket_code: ticketCode,
+                category: category,
+                description: description,
+                status: 'Pending',
+                admin_response: ''
+            })
+        });
 
-        if (error) throw error;
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error('Supabase Error:', errText);
+            throw new Error('Gagal menyimpan ke database');
+        }
 
         res.json({
             success: true,
             message: 'Laporan berhasil terkirim!',
-            ticketCode: ticketCode
+            ticketCode: ticketCode,
+            ticket_code: ticketCode
         });
     } catch (err) {
         console.error('Error Save Report:', err);
@@ -68,26 +77,30 @@ app.post('/api/reports', async (req, res) => {
 app.get('/api/reports/check/:ticketCode', async (req, res) => {
     try {
         const { ticketCode } = req.params;
+        const formattedCode = ticketCode.trim().toUpperCase();
 
-        const { data, error } = await supabase
-            .from('reports')
-            .select('*')
-            .eq('ticket_code', ticketCode.trim().toUpperCase())
-            .single();
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/reports?ticket_code=eq.${formattedCode}`, {
+            method: 'GET',
+            headers: getHeaders()
+        });
 
-        if (error || !data) {
+        const data = await response.json();
+
+        if (!response.ok || !data || data.length === 0) {
             return res.status(404).json({ success: false, message: 'Kode tiket tidak ditemukan.' });
         }
+
+        const report = data[0];
 
         res.json({
             success: true,
             report: {
-                ticketCode: data.ticket_code,
-                category: data.category,
-                description: data.description,
-                status: data.status,
-                adminResponse: data.admin_response,
-                createdAt: data.created_at
+                ticketCode: report.ticket_code,
+                category: report.category,
+                description: report.description,
+                status: report.status,
+                adminResponse: report.admin_response,
+                createdAt: report.created_at
             }
         });
     } catch (err) {
@@ -99,12 +112,16 @@ app.get('/api/reports/check/:ticketCode', async (req, res) => {
 // 4. API Ambil Semua Laporan (Portal BK Admin)
 app.get('/api/admin/reports', async (req, res) => {
     try {
-        const { data, error } = await supabase
-            .from('reports')
-            .select('*')
-            .order('created_at', { ascending: false });
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/reports?order=created_at.desc`, {
+            method: 'GET',
+            headers: getHeaders()
+        });
 
-        if (error) throw error;
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error('Gagal ambil data');
+        }
 
         const formattedReports = data.map(item => ({
             id: item.id,
@@ -128,17 +145,17 @@ app.post('/api/admin/reply', async (req, res) => {
     try {
         const { ticketCode, status, adminResponse } = req.body;
 
-        const { data, error } = await supabase
-            .from('reports')
-            .update({ 
-                status: status || 'Diproses', 
-                admin_response: adminResponse 
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/reports?ticket_code=eq.${ticketCode}`, {
+            method: 'PATCH',
+            headers: getHeaders(),
+            body: JSON.stringify({
+                status: status || 'Diproses',
+                admin_response: adminResponse
             })
-            .eq('ticket_code', ticketCode)
-            .select();
+        });
 
-        if (error || !data.length) {
-            return res.status(404).json({ success: false, message: 'Laporan tidak ditemukan untuk diperbarui.' });
+        if (!response.ok) {
+            throw new Error('Gagal memperbarui balasan');
         }
 
         res.json({ success: true, message: 'Balasan berhasil disimpan!' });
