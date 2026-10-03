@@ -1,194 +1,201 @@
-require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
-const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const path = require('path');
+require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// Konfigurasi Supabase
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://xxxxxxxxxxxx.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_KEY || 'your-supabase-anon-key';
+// 1. Inisialisasi Supabase Client
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error("CRITICAL ERROR: SUPABASE_URL atau SUPABASE_KEY belum terpasang di Environment Variables!");
+}
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Middleware
+// 2. Middleware Parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public'))); // Menyajikan file html dari folder public
 
-// Session untuk autentikasi Admin/Guru BK
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'rahasia-guru-bk-super-aman',
+// 3. Konfigurasi Sesi (Session) untuk Admin
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'kunci_rahasia_sesi_bk_default',
     resave: false,
     saveUninitialized: false,
-    cookie: { 
-        maxAge: 1000 * 60 * 60 * 24 // Valid selama 24 jam
-    }
-}));
+    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 1 Hari
+  })
+);
 
-// Helper untuk membuat Kode Tiket Acak (Contoh: BK-8A2F)
-function generateTicketCode() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let code = 'BK-';
-    for (let i = 0; i < 4; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return code;
-}
+// Serve Static Files dari folder public
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Middleware Proteksi Halaman Admin
 function requireAuth(req, res, next) {
-    if (req.session && req.session.isAdmin) {
-        next();
-    } else {
-        res.status(401).json({ success: false, message: 'Akses ditolak. Silakan login terlebih dahulu.' });
-    }
+  if (req.session && req.session.isAdmin) {
+    return next();
+  }
+  return res.status(401).json({ success: false, message: 'Akses ditolak. Silakan login terlebih dahulu.' });
 }
 
 // ==========================================
-// ENDPOINT SISWA (PUBLIC)
+// API ROUTES FOR SISWA (PENGADUAN)
 // ==========================================
 
-// 1. Kirim Laporan Baru
+// API: Kirim Laporan Pengaduan Baru
 app.post('/api/reports', async (req, res) => {
-    try {
-        const { category, description } = req.body;
+  try {
+    const { category, description } = req.body;
 
-        if (!category || !description) {
-            return res.status(400).json({ success: false, message: 'Kategori dan deskripsi wajib diisi.' });
+    if (!category || !description) {
+      return res.status(400).json({ success: false, message: 'Kategori dan deskripsi wajib diisi.' });
+    }
+
+    // Generate kode tiket acak (contoh: BK-7A29B)
+    const ticket_code = 'BK-' + Math.random().toString(36).substring(2, 7).toUpperCase();
+
+    // Simpan ke database Supabase
+    const { data, error } = await supabase
+      .from('reports')
+      .insert([
+        {
+          ticket_code,
+          category,
+          description,
+          status: 'Pending',
+          admin_response: ''
         }
+      ])
+      .select();
 
-        const ticketCode = generateTicketCode();
-
-        const { data, error } = await supabase
-            .from('reports')
-            .insert([
-                {
-                    ticket_code: ticketCode,
-                    category: category,
-                    description: description,
-                    status: 'Pending',
-                    admin_response: ''
-                }
-            ])
-            .select();
-
-        if (error) throw error;
-
-        return res.json({
-            success: true,
-            ticketCode: ticketCode,
-            message: 'Laporan berhasil dibuat.'
-        });
-    } catch (err) {
-        console.error('Error insert report:', err.message);
-        return res.status(500).json({ success: false, message: 'Gagal menyimpan laporan ke server.' });
+    if (error) {
+      console.error('Supabase Error (Insert):', error);
+      return res.status(500).json({ success: false, message: 'Gagal menyimpan laporan ke database: ' + error.message });
     }
-});
 
-// 2. Cek Laporan Berdasarkan Kode Tiket
-app.get('/api/reports/check/:ticketCode', async (req, res) => {
-    try {
-        const ticketCode = req.params.ticketCode.toUpperCase();
-
-        const { data, error } = await supabase
-            .from('reports')
-            .select('*')
-            .eq('ticket_code', ticketCode)
-            .single();
-
-        if (error || !data) {
-            return res.status(404).json({ success: false, message: 'Kode tiket tidak ditemukan.' });
-        }
-
-        return res.json({
-            success: true,
-            report: data
-        });
-    } catch (err) {
-        console.error('Error check report:', err.message);
-        return res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server.' });
-    }
-});
-
-// ==========================================
-// ENDPOINT ADMIN / GURU BK (PROTECTED)
-// ==========================================
-
-// 1. Check Status Session Login Admin
-app.get('/api/admin/check-auth', (req, res) => {
-    if (req.session && req.session.isAdmin) {
-        return res.json({ authenticated: true });
-    }
-    return res.json({ authenticated: false });
-});
-
-// 2. Login Admin
-app.post('/api/admin/login', (req, res) => {
-    const { password } = req.body;
-    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'adminBK123'; // Password Login Guru BK
-
-    if (password === ADMIN_PASSWORD) {
-        req.session.isAdmin = true;
-        return res.json({ success: true, message: 'Login berhasil.' });
-    } else {
-        return res.status(401).json({ success: false, message: 'Kata sandi salah!' });
-    }
-});
-
-// 3. Logout Admin
-app.post('/api/admin/logout', (req, res) => {
-    req.session.destroy((err) => {
-        if (err) {
-            return res.status(500).json({ success: false, message: 'Gagal logout.' });
-        }
-        res.clearCookie('connect.sid');
-        return res.json({ success: true, message: 'Logout berhasil.' });
+    return res.status(200).json({
+      success: true,
+      message: 'Laporan berhasil terkirim!',
+      ticket_code: ticket_code,
+      data: data[0]
     });
+  } catch (err) {
+    console.error('Server Error (Post Report):', err);
+    return res.status(500).json({ success: false, message: 'Terjadi kesalahan internal pada server.' });
+  }
 });
 
-// 4. Ambil Seluruh Laporan (Wajib Login)
+// API: Cek Status Laporan Berdasarkan Kode Tiket
+app.get('/api/reports/check/:ticketCode', async (req, res) => {
+  try {
+    const { ticketCode } = req.params;
+
+    const { data, error } = await supabase
+      .from('reports')
+      .select('*')
+      .eq('ticket_code', ticketCode.trim().toUpperCase())
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ success: false, message: 'Kode tiket tidak ditemukan.' });
+    }
+
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error('Server Error (Check Ticket):', err);
+    return res.status(500).json({ success: false, message: 'Gagal mengecek status laporan.' });
+  }
+});
+
+// ==========================================
+// API ROUTES FOR ADMIN
+// ==========================================
+
+// API: Login Admin
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  const adminPassword = process.env.ADMIN_PASSWORD || 'adminBK123';
+
+  if (password === adminPassword) {
+    req.session.isAdmin = true;
+    return res.status(200).json({ success: true, message: 'Login berhasil!' });
+  } else {
+    return res.status(401).json({ success: false, message: 'Password salah.' });
+  }
+});
+
+// API: Logout Admin
+app.post('/api/admin/logout', (req, res) => {
+  req.session.destroy(err => {
+    if (err) {
+      return res.status(500).json({ success: false, message: 'Gagal logout.' });
+    }
+    res.clearCookie('connect.sid');
+    return res.status(200).json({ success: true, message: 'Berhasil logout.' });
+  });
+});
+
+// API: Cek Status Sesi Login Admin
+app.get('/api/admin/session', (req, res) => {
+  if (req.session && req.session.isAdmin) {
+    return res.status(200).json({ authenticated: true });
+  }
+  return res.status(200).json({ authenticated: false });
+});
+
+// API: Ambil Semua Laporan (Hanya untuk Admin yang sudah login)
 app.get('/api/admin/reports', requireAuth, async (req, res) => {
-    try {
-        const { data, error } = await supabase
-            .from('reports')
-            .select('*')
-            .order('created_at', { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from('reports')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-        if (error) throw error;
-
-        return res.json({ success: true, reports: data });
-    } catch (err) {
-        console.error('Error fetch reports:', err.message);
-        return res.status(500).json({ success: false, message: 'Gagal mengambil data dari database.' });
+    if (error) {
+      console.error('Supabase Error (Fetch Admin Reports):', error);
+      return res.status(500).json({ success: false, message: 'Gagal mengambil data dari database: ' + error.message });
     }
+
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error('Server Error (Admin Fetch):', err);
+    return res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server.' });
+  }
 });
 
-// 5. Simpan Balasan BK (Wajib Login)
-app.post('/api/admin/reply', requireAuth, async (req, res) => {
-    try {
-        const { ticketCode, status, adminResponse } = req.body;
+// API: Update Status & Tanggapan Admin
+app.put('/api/admin/reports/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, admin_response } = req.body;
 
-        const { data, error } = await supabase
-            .from('reports')
-            .update({
-                status: status || 'Diproses',
-                admin_response: adminResponse
-            })
-            .eq('ticket_code', ticketCode)
-            .select();
+    const { data, error } = await supabase
+      .from('reports')
+      .update({ status, admin_response })
+      .eq('id', id)
+      .select();
 
-        if (error) throw error;
-
-        return res.json({ success: true, message: 'Balasan berhasil disimpan.' });
-    } catch (err) {
-        console.error('Error reply report:', err.message);
-        return res.status(500).json({ success: false, message: 'Gagal menyimpan balasan.' });
+    if (error) {
+      console.error('Supabase Error (Update Report):', error);
+      return res.status(500).json({ success: false, message: 'Gagal memperbarui laporan.' });
     }
+
+    return res.status(200).json({ success: true, message: 'Laporan berhasil diperbarui.', data });
+  } catch (err) {
+    console.error('Server Error (Update Report):', err);
+    return res.status(500).json({ success: false, message: 'Terjadi kesalahan server.' });
+  }
 });
 
-// Jalankan Server
+// ==========================================
+// START SERVER
+// ==========================================
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server berjalan di http://localhost:${PORT}`);
+  console.log(`Server berjalan di port ${PORT}`);
 });
+
+module.exports = app;
