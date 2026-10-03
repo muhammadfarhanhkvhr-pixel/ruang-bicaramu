@@ -9,8 +9,22 @@
     "@supabase/supabase-js": "^2.117.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
-    "express": "^4.19.2",
-    "express-session": "^1.18.0",
+    "dotenv": "^18.0.5",
+    "express": "^4.22.3",
+    "express-session": "^1.19.0",
     "sqlite3": "^5.1.7"
-  }
+  },
+  "description": "��#\u0000 \u0000r\u0000u\u0000a\u0000n\u0000g\u0000-\u0000b\u0000i\u0000c\u0000a\u0000r\u0000a\u0000m\u0000u\u0000\r\u0000 \u0000",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/muhammadfarhanhkvhr-pixel/ruang-bicaramu.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/muhammadfarhanhkvhr-pixel/ruang-bicaramu/issues"
+  },
+  "homepage": "https://github.com/muhammadfarhanhkvhr-pixel/ruang-bicaramu#readme"
 }

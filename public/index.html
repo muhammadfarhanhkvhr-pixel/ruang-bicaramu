@@ -138,7 +138,6 @@
                         </div>
                     `;
 
-                    // Reset form
                     document.getElementById('reportForm').reset();
                 } else {
                     submitResult.innerHTML = `
@@ -176,7 +175,6 @@
                 if (result.success && result.report) {
                     const report = result.report;
                     
-                    // Badges Status
                     const isPending = report.status === 'Pending';
                     const statusBadge = isPending 
                         ? '<span class="badge bg-warning text-dark fs-6">Pending</span>' 

@@ -68,10 +68,29 @@
 
     <!-- JavaScript Logika Portal -->
     <script>
-        // Tangani tombol Enter saat ketik password
+        // Otomatis cek status login saat halaman pertama kali dimuat
+        document.addEventListener('DOMContentLoaded', async () => {
+            await checkSession();
+        });
+
         function handleKeyPress(event) {
             if (event.key === 'Enter') {
                 loginAdmin();
+            }
+        }
+
+        // Cek apakah session login masih aktif di server
+        async function checkSession() {
+            try {
+                const response = await fetch('/api/admin/check-auth');
+                const result = await response.json();
+                if (result.authenticated) {
+                    document.getElementById('loginSection').style.display = 'none';
+                    document.getElementById('dashboardSection').style.display = 'block';
+                    loadAdminReports();
+                }
+            } catch (err) {
+                console.error("Belum login atau gagal koneksi ke session check:", err);
             }
         }
 
@@ -100,7 +119,7 @@
                 if (result.success) {
                     document.getElementById('loginSection').style.display = 'none';
                     document.getElementById('dashboardSection').style.display = 'block';
-                    loadAdminReports(); // Muat data laporan dari Supabase
+                    loadAdminReports();
                 } else {
                     errorMessage.innerText = result.message || 'Kata sandi salah!';
                     errorMessage.style.display = 'block';
@@ -113,13 +132,18 @@
         }
 
         // 2. Fungsi Logout
-        function logoutAdmin() {
+        async function logoutAdmin() {
+            try {
+                await fetch('/api/admin/logout', { method: 'POST' });
+            } catch (err) {
+                console.error("Gagal logout di server:", err);
+            }
             document.getElementById('adminPassword').value = '';
             document.getElementById('loginSection').style.display = 'block';
             document.getElementById('dashboardSection').style.display = 'none';
         }
 
-        // 3. Fungsi Memuat Semua Laporan Siswa dari Database
+        // 3. Fungsi Memuat Semua Laporan Siswa
         async function loadAdminReports() {
             const reportsList = document.getElementById('reportsList');
             if (!reportsList) return;
@@ -141,9 +165,9 @@
 
                     let html = '';
                     result.reports.forEach(report => {
-                        const tCode = report.ticketCode || report.ticket_code;
+                        const tCode = report.ticket_code || report.ticketCode;
                         const statusClass = report.status === 'Pending' ? 'bg-warning text-dark' : 'bg-success';
-                        const adminResp = report.adminResponse || report.admin_response || '';
+                        const adminResp = report.admin_response || report.adminResponse || '';
 
                         html += `
                             <div class="card card-report mb-3 p-3 shadow-sm bg-white">
@@ -168,7 +192,7 @@
                     });
                     reportsList.innerHTML = html;
                 } else {
-                    reportsList.innerHTML = '<p class="text-danger text-center py-4">Gagal memuat data laporan dari server.</p>';
+                    reportsList.innerHTML = `<p class="text-danger text-center py-4">${result.message || 'Gagal memuat data laporan.'}</p>`;
                 }
             } catch (err) {
                 console.error(err);
@@ -199,7 +223,7 @@
                 const result = await response.json();
                 if (result.success) {
                     alert('Balasan berhasil disimpan!');
-                    loadAdminReports(); // Refresh tampilan setelah disimpan
+                    loadAdminReports();
                 } else {
                     alert('Gagal menyimpan balasan: ' + result.message);
                 }
