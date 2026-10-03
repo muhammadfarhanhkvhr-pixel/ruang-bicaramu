@@ -1,105 +1,142 @@
 const express = require('express');
+const cors = require('cors');
 const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware agar server bisa membaca JSON dari frontend
+// Konfirmasi Koneksi Supabase
+const SUPABASE_URL = 'https://dasyopaotgsgxvizhqna.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_wISyIFeMATmrnp2I7kTvyg_B6UQfTT1';
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Database sementara di memori (Server Memory)
-let reports = [];
+// 1. API Kirim Laporan Baru (Disimpan ke Supabase Database)
+app.post('/api/reports', async (req, res) => {
+    try {
+        const { category, description } = req.body;
+        
+        if (!category || !description) {
+            return res.status(400).json({ success: false, message: 'Kategori dan deskripsi wajib diisi!' });
+        }
 
-// ==========================================
-// KATA SANDI GURU BK (BISA KAMU UBAH DISINI)
-// ==========================================
-const ADMIN_PASSWORD = "konselingbksmektris";
+        // Generate Kode Tiket Acak (contoh: BK-7A92)
+        const ticketCode = 'BK-' + Math.random().toString(36).substring(2, 6).toUpperCase();
 
-// Function pembuat kode tiket acak (contoh: BK-8X912)
-function generateTicketCode() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = 'BK-';
-    for (let i = 0; i < 5; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
+        const { data, error } = await supabase
+            .from('reports')
+            .insert([
+                { 
+                    ticket_code: ticketCode, 
+                    category, 
+                    description, 
+                    status: 'Pending', 
+                    admin_response: '' 
+                }
+            ])
+            .select();
+
+        if (error) throw error;
+
+        res.json({
+            success: true,
+            message: 'Laporan berhasil terkirim!',
+            ticketCode: ticketCode
+        });
+    } catch (err) {
+        console.error('Error Save Report:', err);
+        res.status(500).json({ success: false, message: 'Gagal menyimpan laporan ke database.' });
     }
-    return result;
-}
-
-// ------------------------------------------
-// 1. API UNTUK SISWA (TIRU/BUAT LAPORAN)
-// ------------------------------------------
-app.post('/api/reports', (req, res) => {
-    const { category, description } = req.body;
-
-    if (!category || !description) {
-        return res.status(400).json({ error: 'Kategori dan deskripsi wajib diisi!' });
-    }
-
-    const newReport = {
-        id: Date.now(),
-        ticket_code: generateTicketCode(),
-        category,
-        description,
-        status: 'Pending',
-        admin_response: '',
-        created_at: new Date().toISOString()
-    };
-
-    reports.push(newReport);
-    res.status(201).json({ success: true, ticket_code: newReport.ticket_code });
 });
 
-// ------------------------------------------
-// 2. API UNTUK SISWA (CEK TIKET)
-// ------------------------------------------
-app.get('/api/reports/track/:code', (req, res) => {
-    const ticketCode = req.params.code.toUpperCase();
-    const report = reports.find(r => r.ticket_code === ticketCode);
+// 2. API Cek Laporan berdasarkan Kode Tiket (Siswa)
+app.get('/api/reports/check/:ticketCode', async (req, res) => {
+    try {
+        const { ticketCode } = req.params;
 
-    if (!report) {
-        return res.status(404).json({ error: 'Kode tiket tidak ditemukan.' });
+        const { data, error } = await supabase
+            .from('reports')
+            .select('*')
+            .eq('ticket_code', ticketCode.trim().toUpperCase())
+            .single();
+
+        if (error || !data) {
+            return res.status(404).json({ success: false, message: 'Kode tiket tidak ditemukan.' });
+        }
+
+        res.json({
+            success: true,
+            report: {
+                ticketCode: data.ticket_code,
+                category: data.category,
+                description: data.description,
+                status: data.status,
+                adminResponse: data.admin_response,
+                createdAt: data.created_at
+            }
+        });
+    } catch (err) {
+        console.error('Error Check Report:', err);
+        res.status(500).json({ success: false, message: 'Gagal mengambil data laporan.' });
     }
-
-    res.json(report);
 });
 
-// ------------------------------------------
-// 3. API LOGIN GURU BK (VERIFIKASI PASSWORD)
-// ------------------------------------------
-app.post('/api/admin/login', (req, res) => {
-    const { password } = req.body;
-    if (password === ADMIN_PASSWORD) {
-        return res.json({ success: true });
+// 3. API Ambil Semua Laporan (Portal BK Admin)
+app.get('/api/admin/reports', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('reports')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        const formattedReports = data.map(item => ({
+            id: item.id,
+            ticketCode: item.ticket_code,
+            category: item.category,
+            description: item.description,
+            status: item.status,
+            adminResponse: item.admin_response,
+            createdAt: item.created_at
+        }));
+
+        res.json({ success: true, reports: formattedReports });
+    } catch (err) {
+        console.error('Error Fetch Admin Reports:', err);
+        res.status(500).json({ success: false, message: 'Gagal mengambil laporan admin.' });
     }
-    return res.status(401).json({ success: false, error: 'Password salah!' });
 });
 
-// ------------------------------------------
-// 4. API DUA ARAH UNTUK GURU BK (AMBIL & TANGGAPI)
-// ------------------------------------------
+// 4. API Balas & Update Status Laporan (Portal BK Admin)
+app.post('/api/admin/reply', async (req, res) => {
+    try {
+        const { ticketCode, status, adminResponse } = req.body;
 
-// Ambil semua laporan
-app.get('/api/reports', (req, res) => {
-    res.json(reports);
-});
+        const { data, error } = await supabase
+            .from('reports')
+            .update({ 
+                status: status || 'Diproses', 
+                admin_response: adminResponse 
+            })
+            .eq('ticket_code', ticketCode)
+            .select();
 
-// Guru BK memberikan tanggapan / mengubah status
-app.put('/api/reports/:id', (req, res) => {
-    const { id } = req.params;
-    const { status, admin_response } = req.body;
+        if (error || !data.length) {
+            return res.status(404).json({ success: false, message: 'Laporan tidak ditemukan untuk diperbarui.' });
+        }
 
-    const report = reports.find(r => r.id == id);
-    if (!report) {
-        return res.status(404).json({ error: 'Laporan tidak ditemukan.' });
+        res.json({ success: true, message: 'Balasan berhasil disimpan!' });
+    } catch (err) {
+        console.error('Error Reply Report:', err);
+        res.status(500).json({ success: false, message: 'Gagal memperbarui balasan.' });
     }
-
-    if (status) report.status = status;
-    if (admin_response !== undefined) report.admin_response = admin_response;
-
-    res.json({ success: true, report });
 });
 
-// Jalankan Server
 app.listen(PORT, () => {
-    console.log(`Server Ruang Bicaramu berjalan di http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
